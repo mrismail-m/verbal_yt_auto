@@ -1,0 +1,32 @@
+name: YouTube Analytics Report
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 5:00 AM PKT
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: ./shorts-video
+        run: npm ci
+
+      - name: Create GCP Credentials File
+        run: |
+          echo '${{ secrets.GCP_CLIENT_SECRET_JSON }}' > client_secret_2_393682492602-08vva3q34l103pmvh2hklnfvou79e4ck.apps.googleusercontent.com.json
+
+      - name: Run Analytics Script
+        working-directory: ./shorts-video
+        run: node analytics.mjs
+        env:
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}

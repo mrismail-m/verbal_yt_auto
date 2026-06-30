@@ -1,0 +1,44 @@
+name: YouTube Auto-Upload
+
+on:
+  schedule:
+    - cron: '30 2 * * *'  # 7:30 AM PKT
+    - cron: '30 15 * * *' # 8:30 PM PKT
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: ./shorts-video
+        run: npm ci
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Create GCP Credentials File
+        run: |
+          echo '${{ secrets.GCP_CLIENT_SECRET_JSON }}' > client_secret_2_393682492602-08vva3q34l103pmvh2hklnfvou79e4ck.apps.googleusercontent.com.json
+
+      - name: Run Video Render and Upload
+        working-directory: ./shorts-video
+        run: node render.mjs
+        env:
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
+      - name: Commit updated JSON (to save 'used' status)
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add verbal_mcqs.json
+          git commit -m "Auto-update used questions [skip ci]" || echo "No changes to commit"
+          git push
