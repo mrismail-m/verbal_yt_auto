@@ -86,7 +86,7 @@ Pause and guess before the timer reveals the answer!
           categoryId: '27', // 27 = Education
         },
         status: {
-          privacyStatus: 'private', // Upload as private first, so you can review before publishing
+          privacyStatus: 'public', // Automatically publish to the public
           selfDeclaredMadeForKids: false,
         },
       },
