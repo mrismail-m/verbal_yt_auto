@@ -9,3 +9,9 @@ client_secret_*.json
 !verbal_mcqs.json
 !package.json
 !package-lock.json
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
