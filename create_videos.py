@@ -8,7 +8,7 @@ def sanitize_filename(name: str) -> str:
     # Remove invalid characters for filenames
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-def create_videos(file_path: str):
+def create_videos(file_path: str, story_title: str = None, force_duration: float = None):
     if not os.path.exists(file_path):
         print(f"Error: {file_path} not found.")
         return
@@ -25,6 +25,9 @@ def create_videos(file_path: str):
 
     for i, story in enumerate(stories):
         title = story.get("title", f"Story {i}")
+        if story_title and title != story_title:
+            continue
+            
         prompts_data = story.get("image_prompts")
         
         if not prompts_data or "scenes" not in prompts_data:
@@ -44,7 +47,7 @@ def create_videos(file_path: str):
         valid_scenes = []
         for scene in scenes:
             scene_number = scene.get("scene_number")
-            duration = scene.get("duration_seconds", 4) # default 4 if missing
+            duration = force_duration if force_duration is not None else scene.get("duration_seconds", 4)
             image_filename = f"scene_{scene_number:02d}.jpeg"
             image_path = os.path.join(story_dir, image_filename)
             
@@ -100,6 +103,8 @@ def create_videos(file_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create 1080x1920 videos from generated story images.")
     parser.add_argument("--file", type=str, default="scraper/stories.json", help="Path to stories.json")
+    parser.add_argument("--story", type=str, default=None, help="Process only the story with this title")
+    parser.add_argument("--duration", type=float, default=None, help="Force duration in seconds for each image")
     args = parser.parse_args()
 
-    create_videos(args.file)
+    create_videos(args.file, args.story, args.duration)

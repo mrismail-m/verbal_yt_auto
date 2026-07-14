@@ -7,6 +7,7 @@ out/
 client_secret_*.json
 *.json
 !verbal_mcqs.json
+!scraper/stories.json
 !package.json
 !package-lock.json
 

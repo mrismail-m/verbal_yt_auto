@@ -6,8 +6,8 @@ import re
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from PIL import Image
 import io
+from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()
 
@@ -15,7 +15,76 @@ def sanitize_filename(name: str) -> str:
     # Remove invalid characters for filenames
     return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-def generate_images(file_path: str):
+def generate_fallback_image(image_path: str, title: str, scene_number: int, prompt_text: str, narration: str):
+    # Width and height for a vertical YouTube Short (9:16)
+    width, height = 1080, 1920
+    # Stylish dark slate background
+    image = Image.new("RGB", (width, height), color="#1e222b")
+    draw = ImageDraw.Draw(image)
+    
+    # Try to load a clean system font, fall back to default if not found
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]
+    
+    title_font = None
+    body_font = None
+    
+    for path in font_paths:
+        if os.path.exists(path):
+            try:
+                title_font = ImageFont.truetype(path, 60)
+                body_font = ImageFont.truetype(path, 40)
+                break
+            except Exception:
+                pass
+                
+    if title_font is None:
+        title_font = ImageFont.load_default()
+        body_font = ImageFont.load_default()
+        
+    # Draw title header
+    draw.text((540, 250), title.upper(), fill="#ffd700", font=title_font, anchor="mm")
+    draw.text((540, 350), f"SCENE {scene_number}", fill="#ffffff", font=body_font, anchor="mm")
+    
+    # Wrap text
+    text_to_wrap = narration if narration else prompt_text
+    wrapped_lines = []
+    words = text_to_wrap.split()
+    current_line = []
+    for word in words:
+        current_line.append(word)
+        line_str = " ".join(current_line)
+        # Check text width
+        try:
+            bbox = draw.textbbox((0, 0), line_str, font=body_font)
+            line_width = bbox[2] - bbox[0]
+        except Exception:
+            # Fallback for old PIL versions
+            line_width = len(line_str) * 20
+            
+        if line_width > 900:
+            current_line.pop()
+            wrapped_lines.append(" ".join(current_line))
+            current_line = [word]
+    if current_line:
+        wrapped_lines.append(" ".join(current_line))
+        
+    # Draw wrapped text centered vertically
+    y = 800
+    for line in wrapped_lines:
+        draw.text((540, y), line, fill="#e1e1e1", font=body_font, anchor="mm")
+        y += 60
+        
+    # Draw a thin gold border for aesthetic style
+    draw.rectangle([20, 20, 1060, 1900], outline="#ffd700", width=4)
+        
+    image.save(image_path, "JPEG")
+    print(f"     [Fallback] Generated text-only scene card at {image_path}")
+
+def generate_images(file_path: str, test_mode: bool = False, story_title: str = None):
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("Error: GEMINI_API_KEY environment variable not set.")
@@ -38,6 +107,8 @@ def generate_images(file_path: str):
 
     for i, story in enumerate(stories):
         title = story.get("title", f"Story {i}")
+        if story_title and title != story_title:
+            continue
         prompts_data = story.get("image_prompts")
         
         if not prompts_data or "scenes" not in prompts_data:
@@ -53,6 +124,7 @@ def generate_images(file_path: str):
         for scene in scenes:
             scene_number = scene.get("scene_number")
             prompt_text = scene.get("image_prompt")
+            narration = scene.get("narration", "")
             
             if not scene_number or not prompt_text:
                 continue
@@ -67,41 +139,52 @@ def generate_images(file_path: str):
             print(f"  -> Generating {image_filename}...")
             
             try:
-                # Use imagen-3.0-generate-002 for image generation
-                result = client.models.generate_images(
-                    model='imagen-3.0-generate-002',
-                    prompt=prompt_text,
-                    config=types.GenerateImagesConfig(
-                        number_of_images=1,
-                        output_mime_type="image/jpeg",
-                        aspect_ratio="9:16",
-                        # person_generation="ALLOW_ADULT" # Optional: add if needed for character generation
+                # Use gemini-2.5-flash-image for image generation via generate_content
+                result = client.models.generate_content(
+                    model='gemini-2.5-flash-image',
+                    contents=prompt_text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["TEXT", "IMAGE"]
                     )
                 )
                 
-                if result.generated_images:
-                    generated_image = result.generated_images[0]
-                    # Convert raw bytes to a PIL Image and save
-                    image_bytes = generated_image.image.image_bytes
-                    image = Image.open(io.BytesIO(image_bytes))
-                    image.save(image_path)
-                    print(f"     Saved {image_path}")
+                image_saved = False
+                if result.candidates and result.candidates[0].content.parts:
+                    for part in result.candidates[0].content.parts:
+                        if part.inline_data is not None:
+                            image_bytes = part.inline_data.data
+                            image = Image.open(io.BytesIO(image_bytes))
+                            image.save(image_path, "JPEG")
+                            print(f"     Saved {image_path} via Gemini API")
+                            processed_images += 1
+                            image_saved = True
+                            break
+                            
+                if not image_saved:
+                    print("     Failed: No image inline data returned. Generating fallback card...")
+                    generate_fallback_image(image_path, title, scene_number, prompt_text, narration)
                     processed_images += 1
-                else:
-                    print(f"     Failed: No image returned for {image_filename}")
                 
-                # Rate limit delay for image generation (adjust based on your tier limits)
+                # Rate limit delay
                 time.sleep(4)
                 
             except Exception as e:
-                print(f"     Error generating {image_filename}: {e}")
-                time.sleep(10) # Longer delay on error
+                print(f"     Gemini API Error: {e}. Generating fallback card...")
+                generate_fallback_image(image_path, title, scene_number, prompt_text, narration)
+                processed_images += 1
+                time.sleep(1)
+
+        if test_mode:
+            print("\nTest mode enabled. Stopping after 1 item.")
+            break
 
     print(f"\nFinished processing. Generated {processed_images} new images.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate images for stories using Gemini Imagen 3.")
     parser.add_argument("--file", type=str, default="scraper/stories.json", help="Path to stories.json")
+    parser.add_argument("--test", action="store_true", help="Run on only the first item")
+    parser.add_argument("--story", type=str, default=None, help="Process only the story with this title")
     args = parser.parse_args()
 
-    generate_images(args.file)
+    generate_images(args.file, args.test, args.story)
